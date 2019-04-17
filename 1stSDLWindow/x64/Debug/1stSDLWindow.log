@@ -1,2 +1,4 @@
 ﻿  main.cpp
+c:\users\rvance0896\source\repos\1stsdlwindow\1stsdlwindow\main.cpp(299): warning C4305: '+=': truncation from 'double' to 'float'
+c:\users\rvance0896\source\repos\1stsdlwindow\1stsdlwindow\main.cpp(352): warning C4244: 'argument': conversion from 'float' to 'int', possible loss of data
   1stSDLWindow.vcxproj -> C:\Users\rvance0896\source\repos\1stSDLWindow\x64\Debug\1stSDLWindow.exe

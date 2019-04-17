@@ -1,12 +1,19 @@
 #include <SDL.h>
 #include <SDL_image.h>
+#include <SDL_ttf.h>
+#include <Windows.h>
+#include <iostream>
 #include <stdio.h>
 #include <string>
+#include <cmath>
 
 using namespace std;
 
 const int screen_width = 640;
 const int screen_height = 480;
+
+int vert = 240;
+int horz = 320;
 
 class LTexture {
 
@@ -17,6 +24,7 @@ public:
 	~LTexture();
 
 	bool loadFromFile(string path);
+	bool loadFromRenderedText(string textureText, SDL_Color textColor);
 
 	void free();
 	void setColor(Uint8 red, Uint8 green, Uint8 blue);
@@ -45,10 +53,13 @@ SDL_Window* gWindow = NULL;
 
 SDL_Renderer* gRenderer = NULL;
 
-const int WALKING_ANIMATION_FRAMES = 4;
-SDL_Rect gSpriteClips[WALKING_ANIMATION_FRAMES];
-LTexture gSpriteSheetTexture;
+SDL_Rect gSpriteClips[4];
+
+TTF_Font *gFont = NULL;
+
+LTexture gTextTexture;
 LTexture gBackgroundTexture;
+LTexture gSprite;
 
 LTexture::LTexture() {
 	mTexture = NULL;
@@ -80,10 +91,34 @@ bool LTexture::loadFromFile(string path) {
 			mWidth = loadedSurface->w;
 			mHeight = loadedSurface->h;
 		}
+
 		SDL_FreeSurface(loadedSurface);
 	}
 
 	mTexture = newTexture;
+	return mTexture != NULL;
+}
+
+bool LTexture::loadFromRenderedText(string textureText, SDL_Color textColor) {
+	free();
+
+	SDL_Surface* textSurface = TTF_RenderText_Solid(gFont, textureText.c_str(), textColor);
+	if (textSurface == NULL) {
+		printf("Unable to render text surface! SDL_ttf Error: %s\n", TTF_GetError());
+	}
+	else {
+		mTexture = SDL_CreateTextureFromSurface(gRenderer, textSurface);
+		if (mTexture == NULL) {
+			printf("Unable to create texture from rendered text! SDL Error: %s\n", SDL_GetError());
+		}
+		else {
+			mWidth = textSurface->w;
+			mHeight = textSurface->h;
+		}
+
+		SDL_FreeSurface(textSurface);
+	}
+
 	return mTexture != NULL;
 }
 
@@ -117,6 +152,7 @@ void LTexture::render(int x, int y, SDL_Rect* clip, double angle, SDL_Point* cen
 	}
 
 	SDL_RenderCopyEx(gRenderer, mTexture, clip, &renderQuad, angle, center, flip);
+
 }
 
 int LTexture::getWidth() {
@@ -139,7 +175,7 @@ bool init() {
 			printf("Warning: Linear texture filtering not enabled!");
 		}
 
-		gWindow = SDL_CreateWindow("SDL Tutorial #14", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, screen_width, screen_height, SDL_WINDOW_SHOWN);
+		gWindow = SDL_CreateWindow("SDL Tutorial #16", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, screen_width, screen_height, SDL_WINDOW_SHOWN);
 		if (gWindow == NULL) {
 			printf("Window could not be created! SDL Error: %s\n", SDL_GetError());
 			success = false;
@@ -155,7 +191,12 @@ bool init() {
 
 				int imgFlags = IMG_INIT_PNG;
 				if (!(IMG_Init(imgFlags) & imgFlags)) {
-					printf("SDL_image coul dnot initialize! SDL_image Error: %s\n", IMG_GetError());
+					printf("SDL_image could not initialize! SDL_image Error: %s\n", IMG_GetError());
+					success = false;
+				}
+
+				if (TTF_Init() == -1) {
+					printf("SDL_ttf could not initialize! SDL_ttf Error: %s\n", TTF_GetError());
 					success = false;
 				}
 			}
@@ -169,15 +210,16 @@ bool loadMedia() {
 	bool success = true;
 
 	if (!gBackgroundTexture.loadFromFile("Mybackground.png")) {
-		printf("Failed to load background texture!\n");
+		printf("Failed to load background texture image!\n");
 		success = false;
 	}
 
-	if (!gSpriteSheetTexture.loadFromFile("Sprite.png")) {
-		printf("Failed to load sprite texture!");
+	if (!gSprite.loadFromFile("Sprite.png")) {
+		printf("Failed to load sprite image!\n");
 		success = false;
 	}
 	else {
+		 
 		gSpriteClips[0].x = 0;
 		gSpriteClips[0].y = 0;
 		gSpriteClips[0].w = 25;
@@ -196,22 +238,41 @@ bool loadMedia() {
 		gSpriteClips[3].x = 196;
 		gSpriteClips[3].y = 0;
 		gSpriteClips[3].w = 25;
-		gSpriteClips[3].h =25;
+		gSpriteClips[3].h = 25; 
+
+	}
+
+	gFont = TTF_OpenFont("lazy.ttf", 28);
+	if (gFont == NULL) {
+		printf("Failed to load lazy font! SDL_ttf Error: %s\n", TTF_GetError());
+		success = false;
+	}
+	else {
+		SDL_Color textColor = { 0, 0, 0 };
+		if (!gTextTexture.loadFromRenderedText("The quick brown fox jumps over the lazy dog", textColor)) {
+			printf("Failed to load render text texture!\n");
+			success = false;
+		}
 	}
 
 	return success;
 }
 
 void close() {
-	gSpriteSheetTexture.free();
+	gTextTexture.free();
+
+	TTF_CloseFont(gFont);
+	gFont = NULL;
 
 	SDL_DestroyRenderer(gRenderer);
 	SDL_DestroyWindow(gWindow);
 	gWindow = NULL;
 	gRenderer = NULL;
 
+	TTF_Quit();
 	IMG_Quit();
 	SDL_Quit();
+
 }
 
 int main(int argc, char* args[]) {
@@ -224,39 +285,59 @@ int main(int argc, char* args[]) {
 		}
 		else {
 			bool quit = false;
+			bool falling = true;
 
 			SDL_Event e;
 
-			double degrees = 0;
+			int hangtime = 0;
 
-			SDL_RendererFlip fliptype = SDL_FLIP_NONE;
+			float vert = 375;
+			float horz = 320;
 
 			while (!quit) {
+
+				vert += 2.67893;
+				if (vert >= 446) {
+					vert = 446;
+				}
+
 				while (SDL_PollEvent(&e) != 0) {
+
 					if (e.type == SDL_QUIT) {
+						system("cls");
 						quit = true;
 					}
 					else if (e.type == SDL_KEYDOWN) {
+
 						switch (e.key.keysym.sym) {
 
 						case SDLK_a:
-							degrees -= 60;
+							horz -= 3;
+							if (horz <= 9) {
+								horz = 9;
+							}
+							system("cls");
+							cout << "x: " << horz << endl;
+							cout << "y: " << vert << endl;
 							break;
 
 						case SDLK_d:
-							degrees += 60;
+							horz += 3;
+							if (horz >= 606) {
+								horz = 606;
+							}
+							system("cls");
+							cout << "x: " << horz << endl;
+							cout << "y: " << vert << endl;
 							break;
 
-						case SDLK_q:
-							fliptype = SDL_FLIP_HORIZONTAL;
+						case SDLK_ESCAPE:
+							system("cls");
+							quit = true;
 							break;
 
-						case SDLK_w:
-							fliptype = SDL_FLIP_NONE;
-							break;
-
-						case SDLK_e:
-							fliptype = SDL_FLIP_VERTICAL;
+						case SDLK_SPACE:
+							vert = 375;
 							break;
 
 						}
@@ -267,13 +348,14 @@ int main(int argc, char* args[]) {
 				SDL_RenderClear(gRenderer);
 
 				gBackgroundTexture.render(0, 0);
-				gSpriteSheetTexture.render((screen_width - gSpriteSheetTexture.getWidth()) / 2, (screen_height - gSpriteSheetTexture.getHeight()) / 2, NULL, degrees, NULL, fliptype);
+
+				gSprite.render(horz, vert, NULL, NULL, NULL);
 
 				SDL_RenderPresent(gRenderer);
-
 			}
 		}
 	}
+
 	close();
 
 	return 0;
